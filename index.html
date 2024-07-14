@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ゴール追加版 マリオ風ゲーム</title>
+    <style>
+        body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #87CEEB; }
+        #gameCanvas { border: 2px solid black; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // ゲーム状態
+        let player, platforms, enemies, coins, powerUps, goal;
+        let score = 0, highScore = 0;
+        let isGameOver = false;
+        let keys = {};
+        let currentLevel = 0;
+
+        // プレイヤークラス
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 30;
+                this.speed = 5;
+                this.jumpForce = 15;
+                this.velX = 0;
+                this.velY = 0;
+                this.isJumping = false;
+                this.isPoweredUp = false;
+                this.powerUpTimer = 0;
+            }
+
+            draw() {
+                ctx.fillStyle = 'red';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                if (this.isPoweredUp) {
+                    ctx.strokeStyle = 'yellow';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(this.x - 2, this.y - 2, this.width + 4, this.height + 4);
+                }
+            }
+
+            update() {
+                if (keys.ArrowLeft) this.velX = -this.speed;
+                else if (keys.ArrowRight) this.velX = this.speed;
+                else this.velX = 0;
+
+                this.x += this.velX;
+                this.y += this.velY;
+
+                this.velY += 0.8;
+
+                if (this.y + this.height > canvas.height) {
+                    this.y = canvas.height - this.height;
+                    this.velY = 0;
+                    this.isJumping = false;
+                }
+
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
+
+                if (this.isPoweredUp) {
+                    this.powerUpTimer--;
+                    if (this.powerUpTimer <= 0) {
+                        this.isPoweredUp = false;
+                    }
+                }
+            }
+
+            jump() {
+                if (!this.isJumping) {
+                    this.velY = -this.jumpForce;
+                    this.isJumping = true;
+                }
+            }
+
+            powerUp() {
+                this.isPoweredUp = true;
+                this.powerUpTimer = 300; // パワーアップ効果は300フレーム（約5秒）続く
+            }
+        }
+
+        class Platform {
+            constructor(x, y, width, height) {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+            }
+
+            draw() {
+                ctx.fillStyle = 'green';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+        }
+
+        class Enemy {
+            constructor(x, y, movementType) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 30;
+                this.speed = 2;
+                this.isAlive = true;
+                this.movementType = movementType;
+                this.movementCounter = 0;
+            }
+
+            draw() {
+                if (this.isAlive) {
+                    ctx.fillStyle = 'purple';
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                }
+            }
+
+            update() {
+                if (this.isAlive) {
+                    switch (this.movementType) {
+                        case 'linear':
+                            this.x -= this.speed;
+                            break;
+                        case 'sine':
+                            this.x -= this.speed;
+                            this.y += Math.sin(this.movementCounter) * 2;
+                            this.movementCounter += 0.1;
+                            break;
+                        case 'circle':
+                            this.x = this.x + Math.cos(this.movementCounter) * 2;
+                            this.y = this.y + Math.sin(this.movementCounter) * 2;
+                            this.movementCounter += 0.05;
+                            break;
+                    }
+
+                    if (this.x + this.width < 0) {
+                        this.x = canvas.width;
+                    }
+                }
+            }
+        }
+
+        class Coin {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 20;
+                this.height = 20;
+            }
+
+            draw() {
+                ctx.fillStyle = 'gold';
+                ctx.beginPath();
+                ctx.arc(this.x + this.width / 2, this.y + this.height / 2, this.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        class PowerUp {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 25;
+                this.height = 25;
+            }
+
+            draw() {
+                ctx.fillStyle = 'cyan';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+        }
+
+        class Goal {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 50;
+                this.height = 80;
+            }
+
+            draw() {
+                ctx.fillStyle = 'white';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.fillStyle = 'red';
+                ctx.fillRect(this.x + 5, this.y + 5, this.width - 10, this.height - 10);
+            }
+        }
+
+        const levels = [
+            {
+                platforms: [
+                    { x: 0, y: 380, width: 800, height: 20 },
+                    { x: 300, y: 300, width: 200, height: 20 },
+                    { x: 600, y: 200, width: 200, height: 20 }
+                ],
+                enemies: [
+                    { x: 700, y: 350, type: 'linear' },
+                    { x: 500, y: 270, type: 'sine' }
+                ],
+                coins: [
+                    { x: 350, y: 250 },
+                    { x: 650, y: 150 },
+                    { x: 750, y: 350 }
+                ],
+                powerUps: [
+                    { x: 400, y: 100 }
+                ],
+                goal: { x: 750, y: 300 }
+            },
+            {
+                platforms: [
+                    { x: 0, y: 380, width: 800, height: 20 },
+                    { x: 100, y: 300, width: 150, height: 20 },
+                    { x: 400, y: 250, width: 150, height: 20 },
+                    { x: 700, y: 200, width: 100, height: 20 }
+                ],
+                enemies: [
+                    { x: 300, y: 350, type: 'linear' },
+                    { x: 600, y: 220, type: 'circle' },
+                    { x: 750, y: 350, type: 'sine' }
+                ],
+                coins: [
+                    { x: 150, y: 250 },
+                    { x: 450, y: 200 },
+                    { x: 750, y: 150 }
+                ],
+                powerUps: [
+                    { x: 700, y: 150 }
+                ],
+                goal: { x: 750, y: 120 }
+            }
+        ];
+
+        function init() {
+            player = new Player(50, canvas.height - 50);
+            loadLevel(currentLevel);
+            score = 0;
+            isGameOver = false;
+        }
+
+        function loadLevel(levelIndex) {
+            const level = levels[levelIndex];
+            platforms = level.platforms.map(p => new Platform(p.x, p.y, p.width, p.height));
+            enemies = level.enemies.map(e => new Enemy(e.x, e.y, e.type));
+            coins = level.coins.map(c => new Coin(c.x, c.y));
+            powerUps = level.powerUps.map(p => new PowerUp(p.x, p.y));
+            goal = new Goal(level.goal.x, level.goal.y);
+        }
+
+        function gameLoop() {
+            if (isGameOver) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 背景
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            player.update();
+            player.draw();
+
+            platforms.forEach(platform => {
+                platform.draw();
+                if (player.y + player.height <= platform.y && player.y + player.height + player.velY >= platform.y &&
+                    player.x + player.width > platform.x && player.x < platform.x + platform.width) {
+                    player.y = platform.y - player.height;
+                    player.velY = 0;
+                    player.isJumping = false;
+                }
+            });
+
+            enemies.forEach(enemy => {
+                if (enemy.isAlive) {
+                    enemy.update();
+                    enemy.draw();
+                    if (player.x < enemy.x + enemy.width &&
+                        player.x + player.width > enemy.x &&
+                        player.y < enemy.y + enemy.height &&
+                        player.y + player.height > enemy.y) {
+                        if (player.velY > 0 && player.y + player.height < enemy.y + enemy.height / 2) {
+                            enemy.isAlive = false;
+                            player.velY = -player.jumpForce / 2;
+                            score += 100;
+                        } else if (!player.isPoweredUp) {
+                            gameOver();
+                        }
+                    }
+                }
+            });
+
+            coins = coins.filter(coin => {
+                coin.draw();
+                if (player.x < coin.x + coin.width &&
+                    player.x + player.width > coin.x &&
+                    player.y < coin.y + coin.height &&
+                    player.y + player.height > coin.y) {
+                    score += 10;
+                    return false;
+                }
+                return true;
+            });
+
+            powerUps = powerUps.filter(powerUp => {
+                powerUp.draw();
+                if (player.x < powerUp.x + powerUp.width &&
+                    player.x + player.width > powerUp.x &&
+                    player.y < powerUp.y + powerUp.height &&
+                    player.y + player.height > powerUp.y) {
+                    player.powerUp();
+                    return false;
+                }
+                return true;
+            });
+
+            goal.draw();
+
+            // ゴールとの衝突判定
+            if (player.x < goal.x + goal.width &&
+                player.x + player.width > goal.x &&
+                player.y < goal.y + goal.height &&
+                player.y + player.height > goal.y) {
+                levelComplete();
+            }
+
+            ctx.fillStyle = 'black';
+            ctx.font = '20px Arial';
+            ctx.fillText('得点: ' + score, 10, 30);
+            ctx.fillText('ハイスコア: ' + highScore, 10, 60);
+            ctx.fillText('レベル: ' + (currentLevel + 1), canvas.width - 100, 30);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function levelComplete() {
+            currentLevel++;
+            if (currentLevel < levels.length) {
+                loadLevel(currentLevel);
+                player.x = 50;
+                player.y = canvas.height - 50;
+            } else {
+                win();
+            }
+        }
+
+        function gameOver() {
+            isGameOver = true;
+            if (score > highScore) {
+                highScore = score;
+            }
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.fillText('ゲームオーバー！得点: ' + score, canvas.width / 2 - 150, canvas.height / 2);
+            ctx.fillText('スペースキーでリスタート', canvas.width / 2 - 150, canvas.height / 2 + 40);
+        }
+
+        function win() {
+            isGameOver = true;
+            if (score > highScore) {
+                highScore = score;
+            }
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.fillText('ゲームクリア！最終得点: ' + score, canvas.width / 2 - 150, canvas.height / 2);
+            ctx.fillText('スペースキーでリスタート', canvas.width / 2 - 150, canvas.height / 2 + 40);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (isGameOver && e.code === 'Space') {
+                currentLevel = 0;
+                init();
+                gameLoop();
+            }
+            if (e.code === 'ArrowUp' || e.code === 'Space') {
+                player.jump();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        // ゲーム開始
+        init();
+        gameLoop();
+    </script>
+</body>
+</html>
